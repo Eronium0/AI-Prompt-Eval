@@ -279,3 +279,25 @@ button.ghost {
 .demo-banner b {
   color: #ffe9a8;
 }
+
+.src-tag {
+  display: inline-block;
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 2px 7px;
+  margin-bottom: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.src-tag.real {
+  border-color: #2f6b3a;
+  color: #aef0bd;
+}
+
+.src-tag.simulated {
+  border-color: #6b5a1f;
+  color: #f1e2a6;
+}

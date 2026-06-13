@@ -66,6 +66,9 @@ export interface RunResult {
   metrics: RunMetrics;
   stopReason: string | null;
   refusal: boolean;
+  /** What actually produced this output (accounts for forced demo). */
+  provider: Provider;
+  model: string;
 }
 
 // ---- Internal model-call shapes (server) ----
@@ -152,5 +155,7 @@ export interface ProviderInfo {
 export interface StatusResponse {
   providers: Record<Provider, ProviderInfo>;
   defaultProvider: Provider;
+  /** True only when PROMPT_EVAL_DEMO is set — the sole way to reach demo output. */
+  demoForced: boolean;
   ollamaHost: string;
 }

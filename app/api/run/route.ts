@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { callModel } from "@/lib/model";
+import { callModel, effectiveProvider } from "@/lib/model";
 import { buildUserMessage, wordCount } from "@/lib/util";
 import type { RunRequest, RunResult, ApiError } from "@/lib/types";
 
@@ -37,10 +37,13 @@ export async function POST(
     });
     const latencyMs = Date.now() - start;
 
+    const ep = effectiveProvider(settings);
     const result: RunResult = {
       output,
       stopReason,
       refusal: stopReason === "refusal",
+      provider: ep,
+      model: ep === "demo" ? "simulated" : settings.model,
       metrics: {
         latencyMs,
         inputTokens: usage?.input_tokens ?? 0,

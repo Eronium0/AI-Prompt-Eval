@@ -49,11 +49,13 @@ The app can talk to three backends, switchable in the UI. It auto-detects what's
    ```
    Open the printed URL (usually http://localhost:3000). Click **Load an example** for a pre-filled task, pick a provider, and **Run all**.
 
-## Demo mode (zero setup)
+## You will not get demo output by accident
 
-When nothing else is configured, the app falls back to **Demo**: format-aware *simulated* outputs (clearly flagged with a banner) so the full UI — variants, side-by-side, metrics, judge — is explorable for free. Demo is for trying the app, not for real evaluation. Force it regardless of provider with `PROMPT_EVAL_DEMO=1` (useful for a zero-cost hosted deploy).
+This app is **local-first**. The provider picker only offers **Ollama** and **Anthropic** — both real. Demo is *not* selectable and is *never* used as a fallback: if Ollama isn't running you get a clear "start Ollama" prompt, not a silent simulation. Every result is also stamped with its source (`ollama · llama3.2` vs `simulated`) so you can verify each one.
 
-> Demo outputs are placeholders — they don't reflect how a prompt would actually perform. Use Ollama or Anthropic for real evaluations.
+The **only** way to get simulated output is to explicitly set `PROMPT_EVAL_DEMO=1` (which forces demo everywhere and shows a banner). Leave it unset for normal use.
+
+> "Real" is guaranteed under a real provider; **accuracy is the model's job, not the app's.** A small model like `llama3.2` (3B) returns genuine but sometimes weak answers — pull a stronger model (`ollama pull llama3.1:8b` / `qwen2.5`) or use Anthropic for higher quality.
 
 ## Stack
 

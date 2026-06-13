@@ -83,19 +83,35 @@ export default function Page() {
   const [judgeError, setJudgeError] = useState<string | null>(null);
 
   const [status, setStatus] = useState<StatusResponse | null>(null);
+  const [checking, setChecking] = useState(false);
 
-  useEffect(() => {
-    fetch("/api/status")
-      .then((r) => r.json())
-      .then((s: StatusResponse) => {
-        setStatus(s);
+  // `applyDefault` only on first load — a manual re-check shouldn't yank the
+  // provider the user has already chosen.
+  async function loadStatus(applyDefault: boolean) {
+    setChecking(true);
+    try {
+      const s = (await (await fetch("/api/status")).json()) as StatusResponse;
+      setStatus(s);
+      if (applyDefault) {
         setSettings((prev) => ({
           ...prev,
           provider: s.defaultProvider,
           model: pickModel(s.defaultProvider, s),
         }));
-      })
-      .catch(() => {});
+      } else {
+        // Keep current provider; refresh its model if it now has options.
+        setSettings((prev) => ({ ...prev, model: pickModel(prev.provider, s) }));
+      }
+    } catch {
+      // leave status as-is
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  useEffect(() => {
+    loadStatus(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function patchTask(p: Partial<Task>) {
@@ -222,9 +238,12 @@ export default function Page() {
 
   const provider = settings.provider;
   const pInfo = status?.providers[provider];
-  const forced = status?.providers.demo.note?.startsWith("Forced") ?? false;
+  const forced = status?.demoForced ?? false;
   const ollamaModels = status?.providers.ollama.models ?? [];
   const anthropicModels = status?.providers.anthropic.models ?? [];
+  // Local-first: demo is never offered in the picker — it's only reachable by
+  // explicitly setting PROMPT_EVAL_DEMO, which forces it everywhere.
+  const providerOptions: Provider[] = forced ? ["demo"] : ["ollama", "anthropic"];
 
   return (
     <div className="container">
@@ -245,13 +264,6 @@ export default function Page() {
           <b>Demo mode forced</b> via <code>PROMPT_EVAL_DEMO</code> — every call
           returns <b>simulated</b> output regardless of the provider selected
           below. Unset it to use a real provider.
-        </div>
-      )}
-      {!forced && provider === "demo" && (
-        <div className="demo-banner">
-          <b>Demo provider selected.</b> Outputs are <b>simulated</b>, not real
-          model responses. For genuine free results, switch to{" "}
-          <b>Ollama (local)</b> below; for Claude, use Anthropic.
         </div>
       )}
       {!forced && provider === "ollama" && status && !pInfo?.available && (
@@ -312,12 +324,24 @@ export default function Page() {
         <h2>2 · Run settings (constant across variants)</h2>
         <div className="row">
           <div>
-            <label>Provider</label>
+            <label>
+              Provider{" "}
+              <button
+                className="ghost"
+                style={{ padding: "0 6px" }}
+                onClick={() => loadStatus(false)}
+                disabled={checking}
+                title="Re-check which providers are available (e.g. after starting Ollama)"
+              >
+                {checking ? "checking…" : "↻ re-check"}
+              </button>
+            </label>
             <select
               value={provider}
               onChange={(e) => changeProvider(e.target.value as Provider)}
+              disabled={forced}
             >
-              {(["ollama", "anthropic", "demo"] as Provider[]).map((p) => (
+              {providerOptions.map((p) => (
                 <option key={p} value={p}>
                   {PROVIDER_LABEL[p]}
                   {status && !status.providers[p].available ? " — not ready" : ""}
@@ -514,6 +538,15 @@ export default function Page() {
                     )}
                     {cell.status === "done" && cell.result && (
                       <>
+                        <span
+                          className={`src-tag ${
+                            cell.result.provider === "demo" ? "simulated" : "real"
+                          }`}
+                        >
+                          {cell.result.provider === "demo"
+                            ? "⚠ simulated (demo)"
+                            : `${cell.result.provider} · ${cell.result.model}`}
+                        </span>
                         {cell.result.refusal && (
                           <div className="error">
                             Model refused this request.

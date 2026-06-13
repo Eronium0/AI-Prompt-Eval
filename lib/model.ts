@@ -9,6 +9,15 @@ import { callOllama, getOllamaInfo, ollamaHost } from "./ollama";
 import { mockCall, forcedDemo } from "./demo";
 
 /**
+ * The provider that will actually serve a call, accounting for the forced-demo
+ * override. The UI stamps this onto results so "real vs simulated" is never
+ * ambiguous.
+ */
+export function effectiveProvider(settings: { provider: Provider }): Provider {
+  return forcedDemo() ? "demo" : settings.provider;
+}
+
+/**
  * Single entry point for every model call. Routes pass options; this dispatches
  * to the chosen provider. PROMPT_EVAL_DEMO forces simulated output regardless.
  */
@@ -31,13 +40,15 @@ export async function getStatus(): Promise<StatusResponse> {
   const ollama = await getOllamaInfo();
   const anthropic = anthropicConfigured();
 
+  // Local-first: never default to demo. If Ollama isn't up yet, still default to
+  // it so the user sees a "start Ollama" prompt rather than silent simulation.
   const defaultProvider: Provider = forced
     ? "demo"
     : ollama.reachable
       ? "ollama"
       : anthropic
         ? "anthropic"
-        : "demo";
+        : "ollama";
 
   return {
     providers: {
@@ -66,6 +77,7 @@ export async function getStatus(): Promise<StatusResponse> {
       },
     },
     defaultProvider,
+    demoForced: forced,
     ollamaHost: ollamaHost(),
   };
 }
