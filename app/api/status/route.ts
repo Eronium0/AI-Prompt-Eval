@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
-import { isDemoMode } from "@/lib/anthropic";
+import { getStatus } from "@/lib/model";
+import type { StatusResponse } from "@/lib/types";
 
 export const runtime = "nodejs";
+// Probes the local Ollama server each call, so don't cache.
+export const dynamic = "force-dynamic";
 
-// Lets the client show a "demo mode" banner without ever exposing the key.
-export async function GET(): Promise<NextResponse<{ demo: boolean }>> {
-  return NextResponse.json({ demo: isDemoMode() });
+// Tells the client which providers are usable right now (Ollama reachable?
+// which models are pulled? is a Claude key set?) — without exposing any secret.
+export async function GET(): Promise<NextResponse<StatusResponse>> {
+  return NextResponse.json(await getStatus());
 }

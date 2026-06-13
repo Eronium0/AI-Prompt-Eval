@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { callModel } from "@/lib/anthropic";
+import { callModel } from "@/lib/model";
+import { parseJsonLoose } from "@/lib/util";
 import { DEFAULT_SETTINGS } from "@/lib/types";
 import type {
   GenerateVariantsRequest,
@@ -41,6 +42,7 @@ export async function POST(
   }
 
   const { task, basePrompt, count } = body;
+  const settings = body.settings ?? DEFAULT_SETTINGS;
   const n = Math.min(Math.max(count || 4, 2), 6);
 
   const instruction = `You are helping a researcher study how prompt specificity affects an LLM's output.
@@ -54,12 +56,12 @@ Produce exactly ${n} prompt variants for this task, ordered from LEAST specific 
 
   try {
     const { output } = await callModel({
-      settings: { ...DEFAULT_SETTINGS, maxTokens: 4000 },
+      settings: { ...settings, maxTokens: Math.max(settings.maxTokens, 2048) },
       userMessage: instruction,
       jsonSchema: VARIANTS_SCHEMA as unknown as Record<string, unknown>,
     });
 
-    const parsed = JSON.parse(output) as GenerateVariantsResponse;
+    const parsed = parseJsonLoose<GenerateVariantsResponse>(output);
     return NextResponse.json(parsed);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error.";

@@ -12,65 +12,75 @@ You define a **task**, enter several **prompt variants** of varying specificity 
 - **Compare side-by-side** with metrics per run: latency, input/output tokens, word count, character count.
 - **Auto-score (optional)** — an LLM-as-judge pass ranks the outputs against a rubric you provide and summarizes how specificity related to quality.
 
-## Stack
+## Providers — real results, free, no key
 
-Next.js (App Router) + TypeScript. The Anthropic API key lives only on the server (in the API routes under `app/api/*`) and is never exposed to the browser. Model calls default to `claude-opus-4-8` with adaptive thinking and streaming, configurable per run in the UI.
+The app can talk to three backends, switchable in the UI. It auto-detects what's available and picks a sensible default.
 
-## Demo mode (no API key required)
+| Provider | Real outputs? | Needs | Best for |
+| --- | --- | --- | --- |
+| **Ollama (local)** | ✅ yes | [Ollama](https://ollama.com) running locally + a pulled model | The "accessible for all" path: genuine results, free, no API key, fully private |
+| **Anthropic (Claude)** | ✅ yes | `ANTHROPIC_API_KEY` | Evaluating against Claude specifically |
+| **Demo** | ❌ simulated | nothing | Trying the UI with zero setup (outputs are placeholders, clearly flagged) |
 
-The app runs **without an API key**: when `ANTHROPIC_API_KEY` is unset, it serves
-*simulated* outputs (clearly flagged with a "Demo mode" banner) so anyone can
-explore the full UI — variants, side-by-side comparison, metrics, and judge
-scores — for free. The simulated outputs are format-aware, so the core point is
-still visible: more specific prompts produce tighter, more controlled results.
+**Recommended: Ollama.** It runs a real open model on your own machine, so anyone can get true results for free — no key, no cost, no data leaving the computer. The research question holds exactly: you're studying how prompt specificity changes a real model's output.
 
-The moment you set a real `ANTHROPIC_API_KEY`, every call uses Claude instead.
+### Quick start with Ollama (real, free, local)
 
-You can also **force** demo mode with a real key present (handy for a public
-deploy you don't want to pay for, or a key with no credits) by setting
-`PROMPT_EVAL_DEMO=1`.
+1. Install Ollama from [ollama.com](https://ollama.com) and start it.
+2. Pull a model (small models run on modest hardware):
+   ```bash
+   ollama pull llama3.2
+   ```
+3. Run the app (below) and pick **Ollama** as the provider. That's it — real outputs, no key.
 
-> Demo outputs are placeholders, not real model responses — they don't reflect
-> how a specific prompt would actually perform. Add a key for real evaluations.
+> Trade-off: Ollama evaluates a local **open** model (Llama, Qwen, Mistral…), not Claude. Use the Anthropic provider if you specifically need Claude. "Accessible for all" here means *anyone willing to install Ollama and pull a model* — more setup than a hosted URL, but the results are real and free.
 
-## Run locally
+## Run the app
 
 1. Install dependencies:
    ```bash
    npm install
    ```
-2. (Optional) Add your API key for real outputs:
-   ```bash
-   cp .env.example .env.local
-   # then edit .env.local and set ANTHROPIC_API_KEY
-   ```
-   Get a key at https://console.anthropic.com/. Skip this step to run in demo mode.
+2. (Optional) Configure a provider — see [`.env.example`](.env.example). You don't
+   need this for Ollama or Demo; add `ANTHROPIC_API_KEY` to `.env.local` only for Claude.
 3. Start the dev server:
    ```bash
    npm run dev
    ```
-   Open http://localhost:3000. Click **Load an example** for a pre-filled task to try immediately.
+   Open the printed URL (usually http://localhost:3000). Click **Load an example** for a pre-filled task, pick a provider, and **Run all**.
+
+## Demo mode (zero setup)
+
+When nothing else is configured, the app falls back to **Demo**: format-aware *simulated* outputs (clearly flagged with a banner) so the full UI — variants, side-by-side, metrics, judge — is explorable for free. Demo is for trying the app, not for real evaluation. Force it regardless of provider with `PROMPT_EVAL_DEMO=1` (useful for a zero-cost hosted deploy).
+
+> Demo outputs are placeholders — they don't reflect how a prompt would actually perform. Use Ollama or Anthropic for real evaluations.
+
+## Stack
+
+Next.js (App Router) + TypeScript. API keys live only on the server (`app/api/*`) and are never exposed to the browser. A provider abstraction in `lib/` dispatches each call to Ollama, Anthropic, or the demo mock.
 
 ## Deploy
 
 Deploys to any Node host that runs Next.js (Vercel, Render, Fly, a container, etc.).
 
-- Set the `ANTHROPIC_API_KEY` environment variable in your host's dashboard — do **not** commit `.env.local`. (Omit it to ship a free, shareable **demo-mode** deploy, or set `PROMPT_EVAL_DEMO=1` to force demo even with a key.)
-- On Vercel: import the repo, add the env var, deploy. The API routes request up to 60s of execution (`maxDuration = 60`); on plans with a shorter function timeout, keep **Max tokens** and **Effort** modest, or switch **Thinking** off, to keep runs fast.
+- A **hosted** deploy can't reach a visitor's local Ollama, so for a public site either set `ANTHROPIC_API_KEY` (real Claude, you pay) or run in **Demo** mode (`PROMPT_EVAL_DEMO=1`, simulated, free). The Ollama path is for people running the app on their own machine.
+- On Vercel: import the repo, set env vars, deploy. The API routes request up to 60s (`maxDuration = 60`); on shorter-timeout plans keep **Max tokens**/**Effort** modest.
 
 ## Project layout
 
 | Path | Purpose |
 | --- | --- |
-| `app/page.tsx` | The single-page UI (task, settings, variants, results, judge). |
+| `app/page.tsx` | The single-page UI (provider, task, variants, results, judge). |
 | `app/api/run/route.ts` | Runs one prompt variant, returns output + metrics. |
 | `app/api/generate-variants/route.ts` | Generates specificity-level variants for a task. |
 | `app/api/judge/route.ts` | LLM-as-judge scoring of a set of outputs. |
-| `lib/anthropic.ts` | Centralized Anthropic client + model/thinking/effort policy. |
-| `lib/types.ts` | Shared request/response types used by server and client. |
+| `app/api/status/route.ts` | Reports which providers are usable right now. |
+| `lib/model.ts` | Dispatcher: routes each call to the chosen provider + builds status. |
+| `lib/ollama.ts` · `lib/anthropic.ts` · `lib/demo.ts` | The three provider implementations. |
+| `lib/util.ts` · `lib/types.ts` | Shared helpers and types (server + client). |
 
 ## Notes on method
 
-- **Keep settings constant across a run.** Model, effort, max tokens, and thinking are applied identically to every variant — that's what isolates the prompt as the variable.
-- **The judge is a signal, not ground truth.** LLM judges can be biased toward length or confidence. Read the outputs yourself alongside the scores.
-- **Thinking off** adds a "final answer only" instruction so reasoning doesn't leak into the compared output.
+- **Keep settings constant across a run.** Provider, model, max tokens (and, for Claude, effort/thinking) are applied identically to every variant — that's what isolates the prompt as the variable.
+- **Compare like with like.** Don't compare a variant run on Ollama against one run on Claude; switch providers only between whole runs.
+- **The judge is a signal, not ground truth.** It runs on your selected provider and can be biased toward length or confidence. Read the outputs yourself alongside the scores.

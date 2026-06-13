@@ -4,10 +4,13 @@ import { useEffect, useState } from "react";
 import {
   DEFAULT_SETTINGS,
   EFFORT_LEVELS,
+  defaultModelFor,
   type Task,
   type Variant,
   type RunSettings,
   type RunResult,
+  type Provider,
+  type StatusResponse,
   type GenerateVariantsResponse,
   type JudgeResponse,
 } from "@/lib/types";
@@ -18,14 +21,25 @@ type CellState = {
   error?: string;
 };
 
-// Deterministic, monotonic IDs. Using crypto.randomUUID()/Math.random() here
-// would differ between the server prerender and client hydration and trip a
-// hydration mismatch — a counter produces the same first value on both sides.
+// Deterministic, monotonic IDs (avoids server/client hydration mismatch).
 let _idSeq = 0;
 const uid = () => `v${++_idSeq}`;
 
 function newVariant(label = "", prompt = ""): Variant {
   return { id: uid(), label, prompt };
+}
+
+const PROVIDER_LABEL: Record<Provider, string> = {
+  ollama: "Ollama (local, real, free)",
+  anthropic: "Anthropic / Claude (real, key)",
+  demo: "Demo (simulated)",
+};
+
+function pickModel(p: Provider, st: StatusResponse | null): string {
+  if (p === "ollama") return st?.providers.ollama.models[0] ?? defaultModelFor("ollama");
+  if (p === "anthropic")
+    return st?.providers.anthropic.models[0] ?? defaultModelFor("anthropic");
+  return defaultModelFor("demo");
 }
 
 const EXAMPLE_TASK: Task = {
@@ -68,12 +82,19 @@ export default function Page() {
   const [judge, setJudge] = useState<JudgeResponse | null>(null);
   const [judgeError, setJudgeError] = useState<string | null>(null);
 
-  const [demo, setDemo] = useState(false);
+  const [status, setStatus] = useState<StatusResponse | null>(null);
 
   useEffect(() => {
     fetch("/api/status")
       .then((r) => r.json())
-      .then((d: { demo: boolean }) => setDemo(d.demo))
+      .then((s: StatusResponse) => {
+        setStatus(s);
+        setSettings((prev) => ({
+          ...prev,
+          provider: s.defaultProvider,
+          model: pickModel(s.defaultProvider, s),
+        }));
+      })
       .catch(() => {});
   }, []);
 
@@ -82,6 +103,9 @@ export default function Page() {
   }
   function patchSettings(p: Partial<RunSettings>) {
     setSettings((s) => ({ ...s, ...p }));
+  }
+  function changeProvider(p: Provider) {
+    patchSettings({ provider: p, model: pickModel(p, status) });
   }
   function updateVariant(id: string, p: Partial<Variant>) {
     setVariants((vs) => vs.map((v) => (v.id === id ? { ...v, ...p } : v)));
@@ -115,7 +139,7 @@ export default function Page() {
       const res = await fetch("/api/generate-variants", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task, basePrompt, count: genCount }),
+        body: JSON.stringify({ task, basePrompt, count: genCount, settings }),
       });
       const data = (await res.json()) as GenerateVariantsResponse | { error: string };
       if (!res.ok || "error" in data) {
@@ -178,7 +202,7 @@ export default function Page() {
       const res = await fetch("/api/judge", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ task, rubric, items }),
+        body: JSON.stringify({ task, rubric, items, settings }),
       });
       const data = (await res.json()) as JudgeResponse | { error: string };
       if (!res.ok || "error" in data) {
@@ -196,6 +220,12 @@ export default function Page() {
     judge?.rankings.find((r) => r.variantId === id)?.score;
   const doneCount = variants.filter((v) => cells[v.id]?.status === "done").length;
 
+  const provider = settings.provider;
+  const pInfo = status?.providers[provider];
+  const forced = status?.providers.demo.note?.startsWith("Forced") ?? false;
+  const ollamaModels = status?.providers.ollama.models ?? [];
+  const anthropicModels = status?.providers.anthropic.models ?? [];
+
   return (
     <div className="container">
       <header>
@@ -209,12 +239,42 @@ export default function Page() {
         </p>
       </header>
 
-      {demo && (
+      {/* PROVIDER STATUS BANNERS */}
+      {forced && (
         <div className="demo-banner">
-          <b>Demo mode.</b> No API key is configured, so outputs are{" "}
-          <b>simulated</b> — not real model responses. Everything is explorable
-          for free. To get real Claude results, set{" "}
-          <code>ANTHROPIC_API_KEY</code> on the server.
+          <b>Demo mode forced</b> via <code>PROMPT_EVAL_DEMO</code> — every call
+          returns <b>simulated</b> output regardless of the provider selected
+          below. Unset it to use a real provider.
+        </div>
+      )}
+      {!forced && provider === "demo" && (
+        <div className="demo-banner">
+          <b>Demo provider selected.</b> Outputs are <b>simulated</b>, not real
+          model responses. For genuine free results, switch to{" "}
+          <b>Ollama (local)</b> below; for Claude, use Anthropic.
+        </div>
+      )}
+      {!forced && provider === "ollama" && status && !pInfo?.available && (
+        <div className="demo-banner">
+          <b>Ollama not detected</b> at <code>{status.ollamaHost}</code>. To get
+          real, free, local results: install it from <b>ollama.com</b>, start it,
+          then pull a model — e.g. <code>ollama pull {settings.model}</code>. Runs
+          will fail until it&apos;s running.
+        </div>
+      )}
+      {!forced &&
+        provider === "ollama" &&
+        pInfo?.available &&
+        ollamaModels.length === 0 && (
+          <div className="demo-banner">
+            <b>Ollama is running, but no models are pulled.</b> Pull one to start:{" "}
+            <code>ollama pull {settings.model}</code>.
+          </div>
+        )}
+      {!forced && provider === "anthropic" && status && !pInfo?.available && (
+        <div className="demo-banner">
+          <b>No Anthropic key set.</b> Add <code>ANTHROPIC_API_KEY</code> on the
+          server to use Claude, or switch to Ollama (local) / Demo.
         </div>
       )}
 
@@ -252,27 +312,54 @@ export default function Page() {
         <h2>2 · Run settings (constant across variants)</h2>
         <div className="row">
           <div>
-            <label>Model</label>
-            <input
-              value={settings.model}
-              onChange={(e) => patchSettings({ model: e.target.value })}
-            />
-          </div>
-          <div>
-            <label>Effort</label>
+            <label>Provider</label>
             <select
-              value={settings.effort}
-              onChange={(e) =>
-                patchSettings({ effort: e.target.value as RunSettings["effort"] })
-              }
+              value={provider}
+              onChange={(e) => changeProvider(e.target.value as Provider)}
             >
-              {EFFORT_LEVELS.map((lvl) => (
-                <option key={lvl} value={lvl}>
-                  {lvl}
+              {(["ollama", "anthropic", "demo"] as Provider[]).map((p) => (
+                <option key={p} value={p}>
+                  {PROVIDER_LABEL[p]}
+                  {status && !status.providers[p].available ? " — not ready" : ""}
                 </option>
               ))}
             </select>
           </div>
+
+          <div>
+            <label>Model</label>
+            {provider === "ollama" && ollamaModels.length > 0 ? (
+              <select
+                value={settings.model}
+                onChange={(e) => patchSettings({ model: e.target.value })}
+              >
+                {ollamaModels.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            ) : provider === "anthropic" && anthropicModels.length > 0 ? (
+              <select
+                value={settings.model}
+                onChange={(e) => patchSettings({ model: e.target.value })}
+              >
+                {anthropicModels.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                value={settings.model}
+                disabled={provider === "demo"}
+                onChange={(e) => patchSettings({ model: e.target.value })}
+                placeholder={provider === "ollama" ? "e.g. llama3.2" : "model name"}
+              />
+            )}
+          </div>
+
           <div>
             <label>Max tokens</label>
             <input
@@ -285,20 +372,44 @@ export default function Page() {
               }
             />
           </div>
-          <div>
-            <label>Thinking</label>
-            <select
-              value={settings.thinking ? "on" : "off"}
-              onChange={(e) => patchSettings({ thinking: e.target.value === "on" })}
-            >
-              <option value="on">adaptive (on)</option>
-              <option value="off">off</option>
-            </select>
-          </div>
+
+          {provider === "anthropic" && (
+            <>
+              <div>
+                <label>Effort</label>
+                <select
+                  value={settings.effort}
+                  onChange={(e) =>
+                    patchSettings({ effort: e.target.value as RunSettings["effort"] })
+                  }
+                >
+                  {EFFORT_LEVELS.map((lvl) => (
+                    <option key={lvl} value={lvl}>
+                      {lvl}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label>Thinking</label>
+                <select
+                  value={settings.thinking ? "on" : "off"}
+                  onChange={(e) =>
+                    patchSettings({ thinking: e.target.value === "on" })
+                  }
+                >
+                  <option value="on">adaptive (on)</option>
+                  <option value="off">off</option>
+                </select>
+              </div>
+            </>
+          )}
         </div>
         <p className="inline-note">
           Settings are identical for every variant, so any output difference comes
           from the prompt — not the configuration.
+          {provider === "ollama" &&
+            " Ollama runs a model on your own machine: real results, free, no key."}
         </p>
       </section>
 
@@ -312,7 +423,7 @@ export default function Page() {
             <input
               value={basePrompt}
               onChange={(e) => setBasePrompt(e.target.value)}
-              placeholder="Base prompt idea (e.g. 'Summarize this update'). Leave blank to let Claude invent one."
+              placeholder="Base prompt idea (e.g. 'Summarize this update'). Leave blank to let the model invent one."
             />
           </div>
           <div className="toolbar">
@@ -459,8 +570,9 @@ export default function Page() {
             </div>
           )}
           <p className="inline-note">
-            An LLM judge is a useful signal, not ground truth — it can be biased
-            toward length or confidence. Read the outputs yourself too.
+            The judge runs on the same provider you selected. An LLM judge is a
+            useful signal, not ground truth — it can be biased toward length or
+            confidence. Read the outputs yourself too.
           </p>
         </section>
       )}

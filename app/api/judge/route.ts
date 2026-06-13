@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { callModel } from "@/lib/anthropic";
+import { callModel } from "@/lib/model";
+import { parseJsonLoose } from "@/lib/util";
 import { DEFAULT_SETTINGS } from "@/lib/types";
 import type { JudgeRequest, JudgeResponse, ApiError } from "@/lib/types";
 
@@ -39,6 +40,7 @@ export async function POST(
   }
 
   const { task, rubric, items } = body;
+  const settings = body.settings ?? DEFAULT_SETTINGS;
   if (!items?.length) {
     return NextResponse.json(
       { error: "No outputs to judge." },
@@ -68,12 +70,16 @@ ${rendered}`;
 
   try {
     const { output } = await callModel({
-      settings: { ...DEFAULT_SETTINGS, maxTokens: 4000, effort: "high" },
+      settings: {
+        ...settings,
+        maxTokens: Math.max(settings.maxTokens, 2048),
+        effort: "high",
+      },
       userMessage: instruction,
       jsonSchema: JUDGE_SCHEMA as unknown as Record<string, unknown>,
     });
 
-    const parsed = JSON.parse(output) as JudgeResponse;
+    const parsed = parseJsonLoose<JudgeResponse>(output);
     return NextResponse.json(parsed);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error.";

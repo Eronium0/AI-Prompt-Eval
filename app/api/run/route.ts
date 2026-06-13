@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { callModel, buildUserMessage, wordCount } from "@/lib/anthropic";
+import { callModel } from "@/lib/model";
+import { buildUserMessage, wordCount } from "@/lib/util";
 import type { RunRequest, RunResult, ApiError } from "@/lib/types";
 
 // Claude calls can run longer than the default serverless limit; ask for more.
